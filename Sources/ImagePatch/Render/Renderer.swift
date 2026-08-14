@@ -1,0 +1,265 @@
+import AppKit
+import CoreGraphics
+
+/// キャンバスの内容を CGImage に描く。画面表示と書き出しで同じコードを使う。
+enum Renderer {
+    static func makeImage(doc: Doc, scale: CGFloat, includeDraft: Bool = true) -> CGImage? {
+        let w = max(1, Int((doc.canvasSize.width * scale).rounded()))
+        let h = max(1, Int((doc.canvasSize.height * scale).rounded()))
+        guard w < 20000, h < 20000 else { return nil }
+
+        guard let ctx = CGContext(
+            data: nil, width: w, height: h,
+            bitsPerComponent: 8, bytesPerRow: 0,
+            space: CGColorSpace(name: CGColorSpace.sRGB) ?? CGColorSpaceCreateDeviceRGB(),
+            bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue | CGBitmapInfo.byteOrder32Big.rawValue
+        ) else { return nil }
+
+        ctx.interpolationQuality = .high
+        // キャンバス座標（左上原点・y 下向き）に合わせる
+        ctx.translateBy(x: 0, y: CGFloat(h))
+        ctx.scaleBy(x: scale, y: -scale)
+
+        if !doc.transparentBackground {
+            ctx.setFillColor(doc.background.cg)
+            ctx.fill(CGRect(origin: .zero, size: doc.canvasSize))
+        }
+
+        for el in doc.elements {
+            draw(el, in: ctx, doc: doc, scale: scale)
+        }
+        if includeDraft, let d = doc.draft {
+            draw(d, in: ctx, doc: doc, scale: scale)
+        }
+
+        return ctx.makeImage()
+    }
+
+    // MARK: - 要素ごとの描画
+
+    private static func draw(_ el: Element, in ctx: CGContext, doc: Doc, scale: CGFloat) {
+        switch el.kind {
+        case let .image(key):
+            guard let img = doc.image(for: key) else { return }
+            drawImage(img, in: el.frame, ctx: ctx)
+        case .rect:
+            drawRect(el, ctx: ctx)
+        case .ellipse:
+            drawEllipse(el, ctx: ctx)
+        case .line:
+            drawLine(el, ctx: ctx)
+        case .arrow:
+            drawArrow(el, ctx: ctx)
+        case .mosaic:
+            drawMosaic(el, ctx: ctx, scale: scale)
+        case let .text(s):
+            drawText(s, el: el, ctx: ctx)
+        case let .badge(n):
+            drawBadge(n, el: el, ctx: ctx)
+        }
+    }
+
+    private static func drawImage(_ img: CGImage, in frame: CGRect, ctx: CGContext) {
+        guard frame.width > 0, frame.height > 0 else { return }
+        ctx.saveGState()
+        ctx.translateBy(x: frame.minX, y: frame.maxY)
+        ctx.scaleBy(x: 1, y: -1)
+        ctx.draw(img, in: CGRect(x: 0, y: 0, width: frame.width, height: frame.height))
+        ctx.restoreGState()
+    }
+
+    private static func drawRect(_ el: Element, ctx: CGContext) {
+        let r = el.frame
+        guard r.width > 0.5, r.height > 0.5 else { return }
+        let path: CGPath
+        if el.style.cornerRadius > 0 {
+            let radius = min(el.style.cornerRadius, min(r.width, r.height) / 2)
+            path = CGPath(roundedRect: r, cornerWidth: radius, cornerHeight: radius, transform: nil)
+        } else {
+            path = CGPath(rect: r, transform: nil)
+        }
+        ctx.saveGState()
+        if el.style.filled {
+            ctx.addPath(path)
+            ctx.setFillColor(el.style.color.withAlpha(0.28).cg)
+            ctx.fillPath()
+        }
+        ctx.addPath(path)
+        ctx.setStrokeColor(el.style.color.cg)
+        ctx.setLineWidth(el.style.lineWidth)
+        ctx.setLineJoin(.round)
+        ctx.strokePath()
+        ctx.restoreGState()
+    }
+
+    private static func drawEllipse(_ el: Element, ctx: CGContext) {
+        let r = el.frame
+        guard r.width > 0.5, r.height > 0.5 else { return }
+        ctx.saveGState()
+        if el.style.filled {
+            ctx.setFillColor(el.style.color.withAlpha(0.28).cg)
+            ctx.fillEllipse(in: r)
+        }
+        ctx.setStrokeColor(el.style.color.cg)
+        ctx.setLineWidth(el.style.lineWidth)
+        ctx.strokeEllipse(in: r)
+        ctx.restoreGState()
+    }
+
+    private static func drawLine(_ el: Element, ctx: CGContext) {
+        ctx.saveGState()
+        ctx.setStrokeColor(el.style.color.cg)
+        ctx.setLineWidth(el.style.lineWidth)
+        ctx.setLineCap(.round)
+        ctx.move(to: el.p0)
+        ctx.addLine(to: el.p1)
+        ctx.strokePath()
+        ctx.restoreGState()
+    }
+
+    private static func drawArrow(_ el: Element, ctx: CGContext) {
+        let a = el.p0, b = el.p1
+        let len = hypot(b.x - a.x, b.y - a.y)
+        guard len > 1 else { return }
+        let ux = (b.x - a.x) / len, uy = (b.y - a.y) / len
+        let head = min(len, max(el.style.lineWidth * 4.0, 14))
+        let halfWidth = head * 0.42
+        let shaftEnd = CGPoint(x: b.x - ux * head * 0.82, y: b.y - uy * head * 0.82)
+        let base = CGPoint(x: b.x - ux * head, y: b.y - uy * head)
+
+        ctx.saveGState()
+        ctx.setStrokeColor(el.style.color.cg)
+        ctx.setFillColor(el.style.color.cg)
+        ctx.setLineWidth(el.style.lineWidth)
+        ctx.setLineCap(.round)
+        ctx.move(to: a)
+        ctx.addLine(to: shaftEnd)
+        ctx.strokePath()
+
+        ctx.move(to: b)
+        ctx.addLine(to: CGPoint(x: base.x - uy * halfWidth, y: base.y + ux * halfWidth))
+        ctx.addLine(to: CGPoint(x: base.x + uy * halfWidth, y: base.y - ux * halfWidth))
+        ctx.closePath()
+        ctx.fillPath()
+        ctx.restoreGState()
+    }
+
+    private static func drawText(_ string: String, el: Element, ctx: CGContext) {
+        guard !string.isEmpty else { return }
+        let attributed = TextMetrics.attributed(string, style: el.style)
+        let size = TextMetrics.size(string, style: el.style)
+        let origin = CGPoint(x: el.frame.minX, y: el.frame.minY)
+
+        if el.style.filled {
+            let pad = TextMetrics.padding
+            let plate = CGRect(x: origin.x - pad, y: origin.y - pad * 0.6,
+                              width: size.width + pad * 2, height: size.height + pad * 1.2)
+            let radius = min(8, plate.height / 3)
+            ctx.saveGState()
+            ctx.addPath(CGPath(roundedRect: plate, cornerWidth: radius, cornerHeight: radius, transform: nil))
+            ctx.setFillColor(el.style.color.readableBackdrop.cg)
+            ctx.fillPath()
+            ctx.restoreGState()
+        }
+
+        ctx.saveGState()
+        let gc = NSGraphicsContext(cgContext: ctx, flipped: true)
+        NSGraphicsContext.saveGraphicsState()
+        NSGraphicsContext.current = gc
+        attributed.draw(with: CGRect(origin: origin, size: CGSize(width: size.width + 4, height: size.height + 4)),
+                        options: [.usesLineFragmentOrigin, .usesFontLeading])
+        NSGraphicsContext.restoreGraphicsState()
+        ctx.restoreGState()
+    }
+
+    private static func drawBadge(_ number: Int, el: Element, ctx: CGContext) {
+        let r = el.frame
+        guard r.width > 2, r.height > 2 else { return }
+        let side = min(r.width, r.height)
+        let circle = CGRect(x: r.midX - side / 2, y: r.midY - side / 2, width: side, height: side)
+
+        ctx.saveGState()
+        ctx.setFillColor(el.style.color.cg)
+        ctx.fillEllipse(in: circle)
+        ctx.setStrokeColor(RGBA(r: 1, g: 1, b: 1, a: 0.95).cg)
+        ctx.setLineWidth(max(1.5, side * 0.06))
+        ctx.strokeEllipse(in: circle.insetBy(dx: side * 0.03, dy: side * 0.03))
+        ctx.restoreGState()
+
+        let fontSize = side * 0.58
+        let label = NSAttributedString(string: "\(number)", attributes: [
+            .font: NSFont.systemFont(ofSize: fontSize, weight: .bold),
+            .foregroundColor: NSColor.white,
+        ])
+        let ls = label.size()
+        let origin = CGPoint(x: circle.midX - ls.width / 2, y: circle.midY - ls.height / 2)
+
+        ctx.saveGState()
+        let gc = NSGraphicsContext(cgContext: ctx, flipped: true)
+        NSGraphicsContext.saveGraphicsState()
+        NSGraphicsContext.current = gc
+        label.draw(at: origin)
+        NSGraphicsContext.restoreGraphicsState()
+        ctx.restoreGState()
+    }
+
+    /// すでに描かれたピクセルを読み戻してブロック平均で塗り直す
+    private static func drawMosaic(_ el: Element, ctx: CGContext, scale: CGFloat) {
+        let r = el.frame.intersection(CGRect(x: 0, y: 0, width: CGFloat(ctx.width) / scale, height: CGFloat(ctx.height) / scale))
+        guard r.width > 1, r.height > 1, let base = ctx.data else { return }
+        ctx.flush()
+
+        let bytesPerRow = ctx.bytesPerRow
+        let maxX = ctx.width, maxY = ctx.height
+        let block = max(2, el.style.mosaicBlock)
+
+        var blocks: [(CGRect, RGBA)] = []
+        var y = r.minY
+        while y < r.maxY {
+            let bh = min(block, r.maxY - y)
+            var x = r.minX
+            while x < r.maxX {
+                let bw = min(block, r.maxX - x)
+                let x0 = max(0, Int((x * scale).rounded(.down)))
+                let y0 = max(0, Int((y * scale).rounded(.down)))
+                let x1 = min(maxX, max(x0 + 1, Int(((x + bw) * scale).rounded(.up))))
+                let y1 = min(maxY, max(y0 + 1, Int(((y + bh) * scale).rounded(.up))))
+                if x0 < x1, y0 < y1 {
+                    let strideX = max(1, (x1 - x0) / 8)
+                    let strideY = max(1, (y1 - y0) / 8)
+                    var sr = 0.0, sg = 0.0, sb = 0.0, sa = 0.0, n = 0.0
+                    var py = y0
+                    while py < y1 {
+                        let row = base.advanced(by: py * bytesPerRow).assumingMemoryBound(to: UInt8.self)
+                        var px = x0
+                        while px < x1 {
+                            let o = px * 4
+                            sr += Double(row[o]); sg += Double(row[o + 1]); sb += Double(row[o + 2]); sa += Double(row[o + 3])
+                            n += 1
+                            px += strideX
+                        }
+                        py += strideY
+                    }
+                    if n > 0, sa > 0 {
+                        // premultiplied のまま平均し、平均アルファで割り戻す
+                        let alpha = min(1, sa / n / 255.0)
+                        let clamp = { (v: Double) in min(1, max(0, v / n / 255.0 / alpha)) }
+                        let color = RGBA(r: clamp(sr), g: clamp(sg), b: clamp(sb), a: alpha)
+                        blocks.append((CGRect(x: x, y: y, width: bw, height: bh), color))
+                    }
+                }
+                x += block
+            }
+            y += block
+        }
+
+        // 読み取りが終わってから塗る（塗った色を隣のブロックが読まないように）
+        ctx.saveGState()
+        ctx.setShouldAntialias(false)
+        for (rect, color) in blocks {
+            ctx.setFillColor(color.cg)
+            ctx.fill(rect)
+        }
+        ctx.restoreGState()
+    }
+}
