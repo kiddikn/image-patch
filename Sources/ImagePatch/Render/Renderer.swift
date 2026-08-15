@@ -117,28 +117,40 @@ enum Renderer {
         ctx.restoreGState()
     }
 
+    /// Skitch 風の矢印。尾から先端へ向かって太くなる軸と、軸幅の約 2.2 倍の三角形の頭を
+    /// 1 本の塗りつぶしパスで描く。比率は Skitch の矢印を実測して合わせている。
     private static func drawArrow(_ el: Element, ctx: CGContext) {
         let a = el.p0, b = el.p1
         let len = hypot(b.x - a.x, b.y - a.y)
         guard len > 1 else { return }
         let ux = (b.x - a.x) / len, uy = (b.y - a.y) / len
-        let head = min(len, max(el.style.lineWidth * 4.0, 14))
-        let halfWidth = head * 0.42
-        let shaftEnd = CGPoint(x: b.x - ux * head * 0.82, y: b.y - uy * head * 0.82)
-        let base = CGPoint(x: b.x - ux * head, y: b.y - uy * head)
+        let nx = -uy, ny = ux
+
+        let shaftHalf = max(el.style.lineWidth * 1.4, 1.5)
+        let headHalf = min(shaftHalf * 2.23, len * 0.3)
+        let headLen = headHalf * 2.0
+        let shaftLen = len - headLen
+        // 尾は軸幅の約 17% まで細くなる（指数的に絞る）
+        let taper: CGFloat = 1.55
+        let steps = 10
+
+        // b を原点に、進行方向の逆向き along・法線方向 across で頂点を作る
+        func pt(_ along: CGFloat, _ across: CGFloat) -> CGPoint {
+            CGPoint(x: b.x - ux * along + nx * across, y: b.y - uy * along + ny * across)
+        }
+        func shaftPoint(_ i: Int, sign: CGFloat) -> CGPoint {
+            let f = CGFloat(i) / CGFloat(steps)
+            return pt(headLen + shaftLen * f, sign * shaftHalf * exp(-taper * f))
+        }
 
         ctx.saveGState()
-        ctx.setStrokeColor(el.style.color.cg)
         ctx.setFillColor(el.style.color.cg)
-        ctx.setLineWidth(el.style.lineWidth)
-        ctx.setLineCap(.round)
-        ctx.move(to: a)
-        ctx.addLine(to: shaftEnd)
-        ctx.strokePath()
-
+        ctx.beginPath()
         ctx.move(to: b)
-        ctx.addLine(to: CGPoint(x: base.x - uy * halfWidth, y: base.y + ux * halfWidth))
-        ctx.addLine(to: CGPoint(x: base.x + uy * halfWidth, y: base.y - ux * halfWidth))
+        ctx.addLine(to: pt(headLen, headHalf))
+        for i in 0...steps { ctx.addLine(to: shaftPoint(i, sign: 1)) }
+        for i in stride(from: steps, through: 0, by: -1) { ctx.addLine(to: shaftPoint(i, sign: -1)) }
+        ctx.addLine(to: pt(headLen, -headHalf))
         ctx.closePath()
         ctx.fillPath()
         ctx.restoreGState()
