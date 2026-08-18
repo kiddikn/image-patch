@@ -1,6 +1,80 @@
 import AppKit
 import SwiftUI
 
+/// ツール切り替えボタン。`.plain` は描画された部分しか当たらないので、
+/// 枠いっぱいを `contentShape` でクリック範囲にする
+private struct ToolButton: View {
+    let tool: Tool
+    let isSelected: Bool
+    let action: () -> Void
+
+    @State private var hovering = false
+
+    var body: some View {
+        Button(action: action) {
+            VStack(spacing: 3) {
+                Image(systemName: tool.systemImage)
+                    .font(.system(size: 15, weight: isSelected ? .semibold : .regular))
+                Text(tool.label)
+                    .font(.system(size: 10, weight: isSelected ? .semibold : .regular))
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.75)
+            }
+            .foregroundStyle(isSelected ? Color.white : Color.primary)
+            .frame(width: 56, height: 44)
+            .background(
+                RoundedRectangle(cornerRadius: 8)
+                    .fill(fill)
+                    .overlay(
+                        RoundedRectangle(cornerRadius: 8)
+                            .stroke(stroke, lineWidth: isSelected ? 1.5 : 1)
+                    )
+            )
+            .contentShape(RoundedRectangle(cornerRadius: 8))
+        }
+        .buttonStyle(.plain)
+        .onHover { hovering = $0 }
+        .animation(.easeOut(duration: 0.1), value: hovering)
+        .help("\(tool.label)（\(tool.key.uppercased())）")
+    }
+
+    private var fill: Color {
+        if isSelected { return Color.accentColor.opacity(hovering ? 1 : 0.9) }
+        return hovering ? Color.primary.opacity(0.12) : .clear
+    }
+
+    private var stroke: Color {
+        if isSelected { return Color.accentColor }
+        return hovering ? Color.primary.opacity(0.25) : .clear
+    }
+}
+
+/// 色ボタン。丸は小さいままでも、当たり判定は正方形いっぱいに取る
+private struct ColorSwatch: View {
+    let color: RGBA
+    let isSelected: Bool
+    let action: () -> Void
+
+    @State private var hovering = false
+
+    var body: some View {
+        Button(action: action) {
+            Circle()
+                .fill(Color(nsColor: color.ns))
+                .frame(width: isSelected || hovering ? 21 : 18, height: isSelected || hovering ? 21 : 18)
+                .overlay(
+                    Circle().stroke(isSelected ? Color.accentColor : Color.gray.opacity(hovering ? 0.9 : 0.5),
+                                    lineWidth: isSelected ? 2.5 : 1)
+                )
+                .frame(width: 26, height: 26)
+                .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .onHover { hovering = $0 }
+        .animation(.easeOut(duration: 0.1), value: hovering)
+    }
+}
+
 struct ContentView: View {
     @ObservedObject var doc: Doc
 
@@ -15,7 +89,7 @@ struct ContentView: View {
             Divider()
             statusRow
         }
-        .frame(minWidth: 980, minHeight: 640)
+        .frame(minWidth: 1080, minHeight: 640)
     }
 
     // MARK: - ツール
@@ -23,43 +97,20 @@ struct ContentView: View {
     private var toolRow: some View {
         HStack(spacing: 6) {
             ForEach(Tool.allCases) { tool in
-                Button {
+                ToolButton(tool: tool, isSelected: doc.tool == tool) {
                     doc.tool = tool
                     doc.touch()
-                } label: {
-                    VStack(spacing: 2) {
-                        Image(systemName: tool.systemImage)
-                            .font(.system(size: 14))
-                        Text(tool.label)
-                            .font(.system(size: 9))
-                    }
-                    .frame(width: 52, height: 34)
                 }
-                .buttonStyle(.plain)
-                .background(doc.tool == tool ? Color.accentColor.opacity(0.22) : Color.clear)
-                .overlay(
-                    RoundedRectangle(cornerRadius: 6)
-                        .stroke(doc.tool == tool ? Color.accentColor : Color.clear, lineWidth: 1)
-                )
-                .clipShape(RoundedRectangle(cornerRadius: 6))
-                .help("\(tool.label)（\(tool.key.uppercased())）")
             }
 
             Divider().frame(height: 30)
 
-            ForEach(Array(RGBA.palette.enumerated()), id: \.offset) { _, color in
-                Button {
-                    doc.applyStyle { $0.color = color }
-                } label: {
-                    Circle()
-                        .fill(Color(nsColor: color.ns))
-                        .frame(width: 18, height: 18)
-                        .overlay(
-                            Circle().stroke(doc.style.color == color ? Color.accentColor : Color.gray.opacity(0.5),
-                                            lineWidth: doc.style.color == color ? 2.5 : 0.5)
-                        )
+            HStack(spacing: 2) {
+                ForEach(Array(RGBA.palette.enumerated()), id: \.offset) { _, color in
+                    ColorSwatch(color: color, isSelected: doc.style.color == color) {
+                        doc.applyStyle { $0.color = color }
+                    }
                 }
-                .buttonStyle(.plain)
             }
 
             ColorPicker("", selection: Binding(

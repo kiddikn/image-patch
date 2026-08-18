@@ -160,6 +160,21 @@ struct Element: Identifiable, Equatable {
         return nil
     }
 
+    /// 実際に描かれる範囲。線幅・矢印の頭・文字背景のプレートは frame の外へはみ出す
+    var paintedFrame: CGRect {
+        switch kind {
+        case .image, .mosaic, .badge:
+            return frame
+        case .rect, .ellipse, .line:
+            return frame.insetBy(dx: -style.lineWidth / 2, dy: -style.lineWidth / 2)
+        case .arrow:
+            let half = max(style.lineWidth * 1.4, 1.5) * 2.23
+            return frame.insetBy(dx: -half, dy: -half)
+        case .text:
+            return style.filled ? frame.insetBy(dx: -TextMetrics.padding, dy: -TextMetrics.padding) : frame
+        }
+    }
+
     var badgeNumber: Int? {
         if case let .badge(n) = kind { return n }
         return nil
