@@ -447,19 +447,25 @@ final class CanvasNSView: NSView, NSTextViewDelegate {
                 let big = max(d.frame.width, d.frame.height)
                 let length = hypot(d.p1.x - d.p0.x, d.p1.y - d.p0.y)
                 doc.draft = nil
+                var added = false
                 if (d.isLinear && length >= 8) || (!d.isLinear && big >= 6) {
                     doc.add(d)
+                    added = true
                 } else if !d.isLinear {
                     // クリックだけなら既定サイズで置く
                     var el = d
                     let side: CGFloat = max(80, doc.style.fontSize * 4)
                     el.setFrame(CGRect(x: start.x, y: start.y, width: side, height: side * 0.6))
                     doc.add(el)
+                    added = true
+                }
+                if added, doc.expandCanvasForElements(doc.selection) {
+                    doc.status = "はみ出したぶんキャンバスを広げました"
                 }
             }
         case .move, .resize:
-            if doc.expandCanvasForTexts(doc.selection) {
-                doc.status = "文字が入るようにキャンバスを広げました"
+            if doc.expandCanvasForElements(doc.selection) {
+                doc.status = "はみ出したぶんキャンバスを広げました"
             }
         case .marquee:
             break
@@ -521,6 +527,7 @@ final class CanvasNSView: NSView, NSTextViewDelegate {
         var el = Element(kind: .badge(doc.nextBadgeNumber), p0: .zero, p1: .zero, style: doc.style)
         el.setFrame(CGRect(x: p.x - side / 2, y: p.y - side / 2, width: side, height: side))
         doc.add(el)
+        doc.expandCanvasForElements([el.id])
         doc.status = "番号 \(el.badgeNumber ?? 1) を置きました"
     }
 
@@ -529,7 +536,7 @@ final class CanvasNSView: NSView, NSTextViewDelegate {
         let size = TextMetrics.size("テキスト", style: doc.style)
         el.setFrame(CGRect(origin: p, size: size))
         doc.add(el)
-        doc.expandCanvasForTexts([el.id])
+        doc.expandCanvasForElements([el.id])
         doc.tool = .select
         beginTextEditing(el.id)
     }
@@ -639,7 +646,7 @@ final class CanvasNSView: NSView, NSTextViewDelegate {
             let size = TextMetrics.size(s, style: $0.style)
             $0.setFrame(CGRect(origin: $0.frame.origin, size: size))
         }
-        doc.expandCanvasForTexts([id])
+        doc.expandCanvasForElements([id])
         refreshTextEditor()
         setNeedsDisplay(bounds)
     }
@@ -669,8 +676,8 @@ final class CanvasNSView: NSView, NSTextViewDelegate {
                 $0.kind = .text(s)
                 $0.setFrame(CGRect(origin: $0.frame.origin, size: TextMetrics.size(s, style: $0.style)))
             }
-            if doc.expandCanvasForTexts([id]) {
-                doc.status = "文字が入るようにキャンバスを広げました"
+            if doc.expandCanvasForElements([id]) {
+                doc.status = "はみ出したぶんキャンバスを広げました"
             }
         }
         doc.touch()

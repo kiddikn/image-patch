@@ -140,6 +140,7 @@ final class Doc: ObservableObject {
             newIDs.insert(copy.id)
         }
         selection = newIDs
+        expandCanvasForElements(newIDs)
         touch()
     }
 
@@ -153,7 +154,7 @@ final class Doc: ObservableObject {
         for id in selection {
             update(id) { $0.translate(by: CGVector(dx: dx, dy: dy)) }
         }
-        expandCanvasForTexts(selection)
+        expandCanvasForElements(selection)
     }
 
     func bringForward() {
@@ -314,13 +315,12 @@ final class Doc: ObservableObject {
         return true
     }
 
-    /// 枠外に置かれたテキストが収まるようにキャンバスを広げる
+    /// 枠外に置かれた要素が収まるようにキャンバスを広げる
     @discardableResult
-    func expandCanvasForTexts(_ ids: Set<UUID>) -> Bool {
+    func expandCanvasForElements(_ ids: Set<UUID>) -> Bool {
         var box = CGRect.null
-        for el in elements where ids.contains(el.id) && el.text != nil {
-            // 「文字背景」のプレートは frame より少し外まで描かれる
-            box = box.union(el.style.filled ? el.frame.insetBy(dx: -TextMetrics.padding, dy: -TextMetrics.padding) : el.frame)
+        for el in elements where ids.contains(el.id) {
+            box = box.union(el.paintedFrame)
         }
         guard !box.isNull else { return false }
         return expandCanvas(toInclude: box)
