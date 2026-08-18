@@ -153,6 +153,7 @@ final class Doc: ObservableObject {
         for id in selection {
             update(id) { $0.translate(by: CGVector(dx: dx, dy: dy)) }
         }
+        expandCanvasForTexts(selection)
     }
 
     func bringForward() {
@@ -288,6 +289,41 @@ final class Doc: ObservableObject {
         canvasSize = CGSize(width: (box.width + margin * 2).rounded(.up),
                             height: (box.height + margin * 2).rounded(.up))
         touch()
+    }
+
+    /// はみ出した rect が収まるまでキャンバスを広げる。
+    /// 左・上へのはみ出しは全要素をずらして吸収する。広げたら true
+    @discardableResult
+    func expandCanvas(toInclude rect: CGRect) -> Bool {
+        guard !rect.isNull, rect.width.isFinite, rect.height.isFinite else { return false }
+        let dx = rect.minX < 0 ? (margin - rect.minX).rounded(.up) : 0
+        let dy = rect.minY < 0 ? (margin - rect.minY).rounded(.up) : 0
+        var w = canvasSize.width + dx
+        var h = canvasSize.height + dy
+        if rect.maxX + dx > w { w = rect.maxX + dx + margin }
+        if rect.maxY + dy > h { h = rect.maxY + dy + margin }
+        let size = CGSize(width: w.rounded(.up), height: h.rounded(.up))
+        guard dx > 0 || dy > 0 || size != canvasSize else { return false }
+        if dx > 0 || dy > 0 {
+            let d = CGVector(dx: dx, dy: dy)
+            for i in elements.indices { elements[i].translate(by: d) }
+            draft?.translate(by: d)
+        }
+        canvasSize = size
+        touch()
+        return true
+    }
+
+    /// 枠外に置かれたテキストが収まるようにキャンバスを広げる
+    @discardableResult
+    func expandCanvasForTexts(_ ids: Set<UUID>) -> Bool {
+        var box = CGRect.null
+        for el in elements where ids.contains(el.id) && el.text != nil {
+            // 「文字背景」のプレートは frame より少し外まで描かれる
+            box = box.union(el.style.filled ? el.frame.insetBy(dx: -TextMetrics.padding, dy: -TextMetrics.padding) : el.frame)
+        }
+        guard !box.isNull else { return false }
+        return expandCanvas(toInclude: box)
     }
 
     func fitCanvasToContentWithCheckpoint() {

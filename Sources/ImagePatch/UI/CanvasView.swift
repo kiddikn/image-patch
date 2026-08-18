@@ -147,6 +147,7 @@ final class CanvasNSView: NSView, NSTextViewDelegate {
         if doc.tool != .crop, cropRect != nil {
             cropRect = nil
         }
+        refreshTextEditor()
         discardCursorRects()
         window?.invalidateCursorRects(for: self)
         setNeedsDisplay(bounds)
@@ -456,6 +457,10 @@ final class CanvasNSView: NSView, NSTextViewDelegate {
                     doc.add(el)
                 }
             }
+        case .move, .resize:
+            if doc.expandCanvasForTexts(doc.selection) {
+                doc.status = "文字が入るようにキャンバスを広げました"
+            }
         case .marquee:
             break
         default:
@@ -524,6 +529,7 @@ final class CanvasNSView: NSView, NSTextViewDelegate {
         let size = TextMetrics.size("テキスト", style: doc.style)
         el.setFrame(CGRect(origin: p, size: size))
         doc.add(el)
+        doc.expandCanvasForTexts([el.id])
         doc.tool = .select
         beginTextEditing(el.id)
     }
@@ -582,14 +588,28 @@ final class CanvasNSView: NSView, NSTextViewDelegate {
 
     // MARK: - テキスト編集
 
+    private func editorFrame(for el: Element) -> NSRect {
+        let f = viewRect(el.frame)
+        return NSRect(x: f.minX - 5, y: f.minY - 4,
+                      width: max(80, f.width + 40), height: max(26, f.height + 10))
+    }
+
+    /// キャンバスが広がってズームや位置が変わっても入力欄を追従させる
+    private func refreshTextEditor() {
+        guard let id = editingID, let editor = textEditor, let el = doc.element(id) else { return }
+        let size = max(9, el.style.fontSize * zoom)
+        if abs((editor.font?.pointSize ?? 0) - size) > 0.5 {
+            editor.font = TextMetrics.font(size: size)
+        }
+        editor.frame = editorFrame(for: el)
+    }
+
     private func beginTextEditing(_ id: UUID) {
         guard let el = doc.element(id), el.text != nil else { return }
         endTextEditing()
         editingID = id
 
-        let f = viewRect(el.frame)
-        let editor = NSTextView(frame: NSRect(x: f.minX - 5, y: f.minY - 4,
-                                             width: max(80, f.width + 40), height: max(26, f.height + 10)))
+        let editor = NSTextView(frame: editorFrame(for: el))
         editor.font = TextMetrics.font(size: max(9, el.style.fontSize * zoom))
         editor.textColor = el.style.color.ns
         editor.drawsBackground = true
@@ -619,11 +639,8 @@ final class CanvasNSView: NSView, NSTextViewDelegate {
             let size = TextMetrics.size(s, style: $0.style)
             $0.setFrame(CGRect(origin: $0.frame.origin, size: size))
         }
-        if let el = doc.element(id) {
-            let f = viewRect(el.frame)
-            editor.frame = NSRect(x: f.minX - 5, y: f.minY - 4,
-                                  width: max(80, f.width + 40), height: max(26, f.height + 10))
-        }
+        doc.expandCanvasForTexts([id])
+        refreshTextEditor()
         setNeedsDisplay(bounds)
     }
 
@@ -651,6 +668,9 @@ final class CanvasNSView: NSView, NSTextViewDelegate {
             doc.update(id) {
                 $0.kind = .text(s)
                 $0.setFrame(CGRect(origin: $0.frame.origin, size: TextMetrics.size(s, style: $0.style)))
+            }
+            if doc.expandCanvasForTexts([id]) {
+                doc.status = "文字が入るようにキャンバスを広げました"
             }
         }
         doc.touch()
