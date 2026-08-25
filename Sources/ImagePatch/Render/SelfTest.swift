@@ -57,6 +57,23 @@ enum SelfTest {
         }
         try? data.write(to: URL(fileURLWithPath: path))
         print("selftest: wrote \(path) (\(Int(doc.canvasSize.width))x\(Int(doc.canvasSize.height)), \(doc.elements.count) elements)")
+
+        // 選択コピー（⌘C / ⌘X）の切り出しも確認する
+        writeSelection(doc: doc, ids: [arrow.id, text.id], base: path, suffix: "-selection")
+        writeSelection(doc: doc, ids: [mosaic.id], base: path, suffix: "-selection-mosaic")
+    }
+
+    private static func writeSelection(doc: Doc, ids: Set<UUID>, base: String, suffix: String) {
+        doc.selection = ids
+        guard let data = Clip.selectionPNGData(doc: doc) else {
+            FileHandle.standardError.write(Data("selftest: selection render failed\n".utf8))
+            exit(1)
+        }
+        let url = URL(fileURLWithPath: base)
+        let out = url.deletingPathExtension().path + suffix + "." + (url.pathExtension.isEmpty ? "png" : url.pathExtension)
+        try? data.write(to: URL(fileURLWithPath: out))
+        let box = doc.selectionPaintedBounds.integral
+        print("selftest: wrote \(out) (\(Int(box.width))x\(Int(box.height)), \(ids.count) selected)")
     }
 
     /// モザイクの効きが分かるよう細かい模様を入れたダミー画像

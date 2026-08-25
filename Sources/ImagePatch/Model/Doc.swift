@@ -144,6 +144,80 @@ final class Doc: ObservableObject {
         touch()
     }
 
+    // MARK: - 切り取り・コピー・貼り付け
+
+    /// アプリ内クリップボード。要素のまま持つので貼り付けたあとも編集できる
+    private(set) var clipboard: [Element] = []
+    /// 同じ内容を続けて貼るときに少しずつずらすためのカウンタ
+    private var pasteCount = 0
+
+    var hasClipboard: Bool { !clipboard.isEmpty }
+
+    /// 選択されている要素が実際に描かれる範囲（線幅や矢印の頭を含む）
+    var selectionPaintedBounds: CGRect {
+        var box = CGRect.null
+        for el in selectedElements { box = box.union(el.paintedFrame) }
+        return box
+    }
+
+    var selectionHasMosaic: Bool {
+        selectedElements.contains { if case .mosaic = $0.kind { return true } else { return false } }
+    }
+
+    func copySelectionToClipboard() {
+        guard !selection.isEmpty else { return }
+        // 重なり順は元のままにする
+        clipboard = elements.filter { selection.contains($0.id) }
+        pasteCount = 0
+    }
+
+    func clearClipboard() {
+        clipboard = []
+        pasteCount = 0
+    }
+
+    func cutSelection() {
+        guard !selection.isEmpty else { return }
+        copySelectionToClipboard()
+        checkpoint()
+        elements.removeAll { selection.contains($0.id) }
+        selection = []
+        touch()
+    }
+
+    /// クリップボードの要素を貼り付ける。`at` を渡すとその位置が左上になる
+    func pasteClipboard(at point: CGPoint? = nil) {
+        guard !clipboard.isEmpty else { return }
+        checkpoint()
+        let box = clipboard.reduce(CGRect.null) { $0.union($1.frame) }
+        let d: CGVector
+        if let p = point, !box.isNull {
+            d = CGVector(dx: (p.x - box.minX).rounded(), dy: (p.y - box.minY).rounded())
+        } else {
+            pasteCount += 1
+            let k = CGFloat(pasteCount) * 24
+            d = CGVector(dx: k, dy: k)
+        }
+
+        var newIDs: Set<UUID> = []
+        for el in clipboard {
+            var copy = el
+            copy.id = UUID()
+            copy.translate(by: d)
+            if case .badge = copy.kind { copy.kind = .badge(nextBadgeNumber) }
+            if copy.isImage {
+                elements.insert(copy, at: firstAnnotationIndex)
+            } else {
+                elements.append(copy)
+            }
+            newIDs.insert(copy.id)
+        }
+        selection = newIDs
+        expandCanvasForElements(newIDs)
+        status = clipboard.count == 1 ? "貼り付けました" : "\(clipboard.count) 個貼り付けました"
+        touch()
+    }
+
     func selectAll() {
         selection = Set(elements.map(\.id))
         touch()
