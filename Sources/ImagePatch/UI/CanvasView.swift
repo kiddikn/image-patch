@@ -264,7 +264,7 @@ final class CanvasNSView: NSView, NSTextViewDelegate {
         ctx.stroke(r)
         ctx.restoreGState()
 
-        let label = NSAttributedString(string: "\(Int(crop.width))×\(Int(crop.height))  Enter で確定 / Esc で取消", attributes: [
+        let label = NSAttributedString(string: "\(Int(crop.width))×\(Int(crop.height))  Enter でここだけ残す / ⌘X でここだけ消す / Esc で取消", attributes: [
             .font: NSFont.systemFont(ofSize: 11, weight: .medium),
             .foregroundColor: NSColor.white,
         ])
@@ -697,6 +697,19 @@ final class CanvasNSView: NSView, NSTextViewDelegate {
 
     func confirmCrop() {
         if let c = cropRect { applyCrop(c) }
+    }
+
+    /// トリミングの逆。囲った範囲を消す。範囲がなければ false
+    @discardableResult
+    func eraseCropRegion() -> Bool {
+        guard let r = cropRect else { return false }
+        // 切り取ったぶんはクリップボードに残す（⌘V で貼り直せる）
+        Clip.copyRegionToPasteboard(doc: doc, region: r)
+        doc.clearClipboard()
+        doc.erase(r)
+        cropRect = nil
+        setNeedsDisplay(bounds)
+        return true
     }
 
     // MARK: - キーボード

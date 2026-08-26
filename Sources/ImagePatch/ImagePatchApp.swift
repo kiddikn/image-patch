@@ -82,10 +82,15 @@ struct ImagePatchApp: App {
             }
 
             CommandGroup(replacing: .pasteboard) {
-                Button("キャンバス全体をコピー") { copyAction() }
+                Button("切り取り") { cutAction() }
+                    .keyboardShortcut("x")
+                Button("コピー") { copyAction() }
                     .keyboardShortcut("c")
                 Button("貼り付け") { pasteAction() }
                     .keyboardShortcut("v")
+                Button("キャンバス全体をコピー") { copyCanvasAction() }
+                    .keyboardShortcut("c", modifiers: [.command, .shift])
+                Divider()
                 Button("複製") { doc.duplicateSelection() }
                     .keyboardShortcut("d")
                 Button("削除") { doc.deleteSelection() }
@@ -106,6 +111,7 @@ struct ImagePatchApp: App {
                 Divider()
                 Button("余白を整える") { doc.fitCanvasToContentWithCheckpoint() }
                 Button("トリミングを確定") { CanvasBridge.shared.view?.confirmCrop() }
+                Button("囲った範囲を消す") { CanvasBridge.shared.view?.eraseCropRegion() }
             }
 
             CommandMenu("ツール") {
@@ -144,11 +150,45 @@ struct ImagePatchApp: App {
         CanvasBridge.shared.view?.isEditingText ?? false
     }
 
+    /// 選択があればその要素だけ、なければキャンバス全体をコピーする
     private func copyAction() {
         if isEditingText {
             NSApp.sendAction(#selector(NSText.copy(_:)), to: nil, from: nil)
             return
         }
+        guard !doc.selection.isEmpty else {
+            copyCanvasAction()
+            return
+        }
+        let count = doc.selection.count
+        doc.copySelectionToClipboard()
+        if Clip.copySelectionToPasteboard(doc: doc) {
+            doc.status = "選択した \(count) 個をコピーしました（⌘V で貼り付け）"
+        } else {
+            doc.status = "コピーできませんでした"
+        }
+    }
+
+    private func cutAction() {
+        if isEditingText {
+            NSApp.sendAction(#selector(NSText.cut(_:)), to: nil, from: nil)
+            return
+        }
+        // トリミングツールで囲った範囲があれば、そこを消す（トリミングの逆）
+        if CanvasBridge.shared.view?.eraseCropRegion() == true { return }
+        guard !doc.selection.isEmpty else {
+            doc.status = "C で範囲を囲むか、V で要素を選んでから ⌘X"
+            return
+        }
+        let count = doc.selection.count
+        let copied = Clip.copySelectionToPasteboard(doc: doc)
+        doc.cutSelection()
+        doc.status = copied ? "\(count) 個を切り取りました（⌘V で貼り付け）" : "\(count) 個を切り取りました"
+    }
+
+    private func copyCanvasAction() {
+        // 全体コピーのあとの ⌘V は「コピーした画像を貼る」ほうが自然なので要素側は捨てる
+        doc.clearClipboard()
         if Clip.copyToPasteboard(doc: doc) {
             doc.status = "キャンバス全体をコピーしました（\(Int(doc.canvasSize.width * doc.exportScale))×\(Int(doc.canvasSize.height * doc.exportScale))）"
         }
@@ -157,6 +197,11 @@ struct ImagePatchApp: App {
     private func pasteAction() {
         if isEditingText {
             NSApp.sendAction(#selector(NSText.paste(_:)), to: nil, from: nil)
+            return
+        }
+        // アプリ内でコピーした要素が最新なら、画像ではなく要素のまま戻す
+        if doc.hasClipboard, Clip.ownsPasteboard {
+            doc.pasteClipboard()
             return
         }
         let images = Clip.readImages()

@@ -4,8 +4,20 @@ import CoreGraphics
 /// キャンバスの内容を CGImage に描く。画面表示と書き出しで同じコードを使う。
 enum Renderer {
     static func makeImage(doc: Doc, scale: CGFloat, includeDraft: Bool = true) -> CGImage? {
-        let w = max(1, Int((doc.canvasSize.width * scale).rounded()))
-        let h = max(1, Int((doc.canvasSize.height * scale).rounded()))
+        var list = doc.elements
+        if includeDraft, let d = doc.draft { list.append(d) }
+        return makeImage(doc: doc,
+                         elements: list,
+                         region: CGRect(origin: .zero, size: doc.canvasSize),
+                         scale: scale,
+                         background: doc.transparentBackground ? nil : doc.background)
+    }
+
+    /// 渡した要素だけを region の範囲で描く。background に nil を渡すと背景は透過
+    static func makeImage(doc: Doc, elements: [Element], region: CGRect, scale: CGFloat, background: RGBA?) -> CGImage? {
+        guard region.width > 0, region.height > 0 else { return nil }
+        let w = max(1, Int((region.width * scale).rounded()))
+        let h = max(1, Int((region.height * scale).rounded()))
         guard w < 20000, h < 20000 else { return nil }
 
         guard let ctx = CGContext(
@@ -16,20 +28,18 @@ enum Renderer {
         ) else { return nil }
 
         ctx.interpolationQuality = .high
-        // キャンバス座標（左上原点・y 下向き）に合わせる
+        // キャンバス座標（左上原点・y 下向き）に合わせ、region の左上を原点に持ってくる
         ctx.translateBy(x: 0, y: CGFloat(h))
         ctx.scaleBy(x: scale, y: -scale)
+        ctx.translateBy(x: -region.minX, y: -region.minY)
 
-        if !doc.transparentBackground {
-            ctx.setFillColor(doc.background.cg)
-            ctx.fill(CGRect(origin: .zero, size: doc.canvasSize))
+        if let background {
+            ctx.setFillColor(background.cg)
+            ctx.fill(region)
         }
 
-        for el in doc.elements {
-            draw(el, in: ctx, doc: doc, scale: scale)
-        }
-        if includeDraft, let d = doc.draft {
-            draw(d, in: ctx, doc: doc, scale: scale)
+        for el in elements {
+            draw(el, in: ctx, doc: doc, scale: scale, origin: region.origin)
         }
 
         return ctx.makeImage()
@@ -37,7 +47,7 @@ enum Renderer {
 
     // MARK: - 要素ごとの描画
 
-    private static func draw(_ el: Element, in ctx: CGContext, doc: Doc, scale: CGFloat) {
+    private static func draw(_ el: Element, in ctx: CGContext, doc: Doc, scale: CGFloat, origin: CGPoint) {
         switch el.kind {
         case let .image(key):
             guard let img = doc.image(for: key) else { return }
@@ -51,12 +61,29 @@ enum Renderer {
         case .arrow:
             drawArrow(el, ctx: ctx)
         case .mosaic:
-            drawMosaic(el, ctx: ctx, scale: scale)
+            drawMosaic(el, ctx: ctx, scale: scale, origin: origin)
         case let .text(s):
             drawText(s, el: el, ctx: ctx)
         case let .badge(n):
             drawBadge(n, el: el, ctx: ctx)
+        case .erase:
+            drawErase(el, ctx: ctx, doc: doc)
         }
+    }
+
+    /// 範囲を消す。背景透過の設定なら本当に穴を開け、そうでなければ背景色で塗る
+    private static func drawErase(_ el: Element, ctx: CGContext, doc: Doc) {
+        let r = el.frame
+        guard r.width > 0.5, r.height > 0.5 else { return }
+        ctx.saveGState()
+        if doc.transparentBackground {
+            ctx.setBlendMode(.clear)
+            ctx.fill(r)
+        } else {
+            ctx.setFillColor(doc.background.cg)
+            ctx.fill(r)
+        }
+        ctx.restoreGState()
     }
 
     private static func drawImage(_ img: CGImage, in frame: CGRect, ctx: CGContext) {
@@ -216,8 +243,9 @@ enum Renderer {
     }
 
     /// すでに描かれたピクセルを読み戻してブロック平均で塗り直す
-    private static func drawMosaic(_ el: Element, ctx: CGContext, scale: CGFloat) {
-        let r = el.frame.intersection(CGRect(x: 0, y: 0, width: CGFloat(ctx.width) / scale, height: CGFloat(ctx.height) / scale))
+    private static func drawMosaic(_ el: Element, ctx: CGContext, scale: CGFloat, origin: CGPoint) {
+        let r = el.frame.intersection(CGRect(x: origin.x, y: origin.y,
+                                             width: CGFloat(ctx.width) / scale, height: CGFloat(ctx.height) / scale))
         guard r.width > 1, r.height > 1, let base = ctx.data else { return }
         ctx.flush()
 
@@ -232,10 +260,10 @@ enum Renderer {
             var x = r.minX
             while x < r.maxX {
                 let bw = min(block, r.maxX - x)
-                let x0 = max(0, Int((x * scale).rounded(.down)))
-                let y0 = max(0, Int((y * scale).rounded(.down)))
-                let x1 = min(maxX, max(x0 + 1, Int(((x + bw) * scale).rounded(.up))))
-                let y1 = min(maxY, max(y0 + 1, Int(((y + bh) * scale).rounded(.up))))
+                let x0 = max(0, Int(((x - origin.x) * scale).rounded(.down)))
+                let y0 = max(0, Int(((y - origin.y) * scale).rounded(.down)))
+                let x1 = min(maxX, max(x0 + 1, Int(((x + bw - origin.x) * scale).rounded(.up))))
+                let y1 = min(maxY, max(y0 + 1, Int(((y + bh - origin.y) * scale).rounded(.up))))
                 if x0 < x1, y0 < y1 {
                     let strideX = max(1, (x1 - x0) / 8)
                     let strideY = max(1, (y1 - y0) / 8)
