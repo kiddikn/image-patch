@@ -417,6 +417,20 @@ final class Doc: ObservableObject {
         touch()
     }
 
+    /// トリミングの逆。選んだ範囲を背景色（透過設定なら透明）で消す。
+    /// 消しゴムは要素として積むので、あとから動かしたり ⌘Z で戻したりできる
+    func erase(_ rect: CGRect) {
+        let r = rect.intersection(CGRect(origin: .zero, size: canvasSize)).integral
+        guard r.width > 2, r.height > 2 else { return }
+        checkpoint()
+        var el = Element(kind: .erase, p0: .zero, p1: .zero, style: style)
+        el.setFrame(r)
+        elements.append(el)
+        selection = []
+        status = "範囲を消しました（\(Int(r.width))×\(Int(r.height))・⌘Z で戻せます）"
+        touch()
+    }
+
     func resizeCanvas(to size: CGSize) {
         checkpoint()
         canvasSize = CGSize(width: max(32, size.width.rounded()), height: max(32, size.height.rounded()))

@@ -103,6 +103,20 @@ enum Clip {
         return rep
     }
 
+    /// キャンバスの一部分（見た目そのまま）をコピーする
+    @discardableResult
+    static func copyRegionToPasteboard(doc: Doc, region: CGRect) -> Bool {
+        let r = region.intersection(CGRect(origin: .zero, size: doc.canvasSize)).integral
+        guard r.width >= 1, r.height >= 1,
+              let full = Renderer.makeImage(doc: doc, scale: doc.exportScale, includeDraft: false),
+              let cg = full.cropping(to: pixelRect(r, scale: doc.exportScale, in: full)) else { return false }
+        let rep = NSBitmapImageRep(cgImage: cg)
+        rep.size = r.size
+        guard let png = rep.representation(using: .png, properties: [:]) else { return false }
+        write(png: png, tiff: rep.representation(using: .tiff, properties: [:]))
+        return true
+    }
+
     /// キャンバス座標の矩形を、書き出し画像のピクセル座標（左上原点）に直す
     private static func pixelRect(_ r: CGRect, scale: CGFloat, in image: CGImage) -> CGRect {
         let full = CGRect(x: 0, y: 0, width: CGFloat(image.width), height: CGFloat(image.height))

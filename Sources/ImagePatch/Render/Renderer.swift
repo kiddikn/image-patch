@@ -66,7 +66,24 @@ enum Renderer {
             drawText(s, el: el, ctx: ctx)
         case let .badge(n):
             drawBadge(n, el: el, ctx: ctx)
+        case .erase:
+            drawErase(el, ctx: ctx, doc: doc)
         }
+    }
+
+    /// 範囲を消す。背景透過の設定なら本当に穴を開け、そうでなければ背景色で塗る
+    private static func drawErase(_ el: Element, ctx: CGContext, doc: Doc) {
+        let r = el.frame
+        guard r.width > 0.5, r.height > 0.5 else { return }
+        ctx.saveGState()
+        if doc.transparentBackground {
+            ctx.setBlendMode(.clear)
+            ctx.fill(r)
+        } else {
+            ctx.setFillColor(doc.background.cg)
+            ctx.fill(r)
+        }
+        ctx.restoreGState()
     }
 
     private static func drawImage(_ img: CGImage, in frame: CGRect, ctx: CGContext) {

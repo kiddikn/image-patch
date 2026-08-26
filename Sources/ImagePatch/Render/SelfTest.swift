@@ -61,6 +61,31 @@ enum SelfTest {
         // 選択コピー（⌘C / ⌘X）の切り出しも確認する
         writeSelection(doc: doc, ids: [arrow.id, text.id], base: path, suffix: "-selection")
         writeSelection(doc: doc, ids: [mosaic.id], base: path, suffix: "-selection-mosaic")
+
+        // 範囲消し（トリミングツール ＋ ⌘X）の確認
+        doc.selection = []
+        let band = CGRect(x: doc.canvasSize.width * 0.12, y: doc.canvasSize.height * 0.5,
+                          width: doc.canvasSize.width * 0.76, height: 90)
+        doc.erase(band)
+        if let data = Clip.pngData(doc: doc) {
+            let out = output(base: path, suffix: "-erase")
+            try? data.write(to: URL(fileURLWithPath: out))
+            print("selftest: wrote \(out) (\(Int(band.width))x\(Int(band.height)) を消去)")
+        }
+
+        // 背景透過のときは本当に穴が開く
+        doc.transparentBackground = true
+        if let data = Clip.pngData(doc: doc) {
+            let out = output(base: path, suffix: "-erase-transparent")
+            try? data.write(to: URL(fileURLWithPath: out))
+            print("selftest: wrote \(out) (背景透過)")
+        }
+    }
+
+    private static func output(base: String, suffix: String) -> String {
+        let url = URL(fileURLWithPath: base)
+        let ext = url.pathExtension.isEmpty ? "png" : url.pathExtension
+        return url.deletingPathExtension().path + suffix + "." + ext
     }
 
     private static func writeSelection(doc: Doc, ids: Set<UUID>, base: String, suffix: String) {
@@ -69,8 +94,7 @@ enum SelfTest {
             FileHandle.standardError.write(Data("selftest: selection render failed\n".utf8))
             exit(1)
         }
-        let url = URL(fileURLWithPath: base)
-        let out = url.deletingPathExtension().path + suffix + "." + (url.pathExtension.isEmpty ? "png" : url.pathExtension)
+        let out = output(base: base, suffix: suffix)
         try? data.write(to: URL(fileURLWithPath: out))
         let box = doc.selectionPaintedBounds.integral
         print("selftest: wrote \(out) (\(Int(box.width))x\(Int(box.height)), \(ids.count) selected)")

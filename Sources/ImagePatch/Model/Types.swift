@@ -117,6 +117,8 @@ enum ElementKind: Equatable {
     case mosaic
     case text(String)
     case badge(Int)
+    /// 範囲を背景色（透過設定なら透明）で塗りつぶして消す
+    case erase
 }
 
 struct Element: Identifiable, Equatable {
@@ -163,7 +165,7 @@ struct Element: Identifiable, Equatable {
     /// 実際に描かれる範囲。線幅・矢印の頭・文字背景のプレートは frame の外へはみ出す
     var paintedFrame: CGRect {
         switch kind {
-        case .image, .mosaic, .badge:
+        case .image, .mosaic, .badge, .erase:
             return frame
         case .rect, .ellipse, .line:
             return frame.insetBy(dx: -style.lineWidth / 2, dy: -style.lineWidth / 2)
@@ -190,6 +192,7 @@ struct Element: Identifiable, Equatable {
         case .mosaic: return "モザイク"
         case .text: return "テキスト"
         case .badge: return "番号"
+        case .erase: return "消去"
         }
     }
 }

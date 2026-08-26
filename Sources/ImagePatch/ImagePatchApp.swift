@@ -111,6 +111,7 @@ struct ImagePatchApp: App {
                 Divider()
                 Button("余白を整える") { doc.fitCanvasToContentWithCheckpoint() }
                 Button("トリミングを確定") { CanvasBridge.shared.view?.confirmCrop() }
+                Button("囲った範囲を消す") { CanvasBridge.shared.view?.eraseCropRegion() }
             }
 
             CommandMenu("ツール") {
@@ -173,8 +174,10 @@ struct ImagePatchApp: App {
             NSApp.sendAction(#selector(NSText.cut(_:)), to: nil, from: nil)
             return
         }
+        // トリミングツールで囲った範囲があれば、そこを消す（トリミングの逆）
+        if CanvasBridge.shared.view?.eraseCropRegion() == true { return }
         guard !doc.selection.isEmpty else {
-            doc.status = "切り取るものを選んでください（V で選択ツール）"
+            doc.status = "C で範囲を囲むか、V で要素を選んでから ⌘X"
             return
         }
         let count = doc.selection.count
